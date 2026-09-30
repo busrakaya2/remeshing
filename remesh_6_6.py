@@ -198,7 +198,6 @@ def remesh_fluid(current_t_s, xb_current_m, domain, ns, solid, fluid, dynamic, a
     a0dt2_key      = fluid_state['a0dt2_key']
 
     old_sample = old_topo_fluid.sample('gauss', 4)
-
     a0dt2_expr = function.replace_arguments(d_field, [(d_name, a0dt2_key)])
 
     # urel's Newmark history is always named 'u0'/'a0δt' since the relative velocity field is always (re)created with argument name 'u'.
