@@ -707,9 +707,7 @@ def remesh_fluid(current_t_s, xb_current_m, domain, ns, solid, fluid, dynamic, a
         ns_h.Fhinv = numpy.linalg.inv(ns_h.Fh)
         ns_h.Ph_ij = '2 (Fh_ij - Fhinv_ji)'
 
-        sqr_gamma = zipped_traction.integral(
-            _dot2(ns_h.h - interface_target, ns_h.h - interface_target) * new_ns.dS
-        ) / domain.cylinder_radius**3
+        sqr_gamma = zipped_traction.integral(_dot2(ns_h.h - interface_target, ns_h.h - interface_target) * new_ns.dS) / domain.cylinder_radius**3
 
         hcons = System(sqr_gamma, trial='h').solve_constraints(
             droptol=1e-9, constrain={'h': dm_outer_cons.copy()}, arguments=args)
