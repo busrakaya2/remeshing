@@ -696,7 +696,8 @@ def remesh_fluid(current_t_s, xb_current_m, domain, ns, solid, fluid, dynamic, a
 
         return System(sqr_bulk, trial='h').solve(constrain=hcons, arguments={})['h']
 
-    def _extend_mesh_state(interface_target):
+    def _extend_mesh_state(interface_target, state_args=None):
+        state_args = args if state_args is None else state_args
         ns_h = Namespace()
         ns_h.h = function.replace_arguments(new_ns.dm, [('dm', 'h')])
         ns_h.htest = function.replace_arguments(new_ns.dm, 'dm:htest') / (domain.cylinder_radius**2 * Pressure('1Pa'))
@@ -713,7 +714,7 @@ def remesh_fluid(current_t_s, xb_current_m, domain, ns, solid, fluid, dynamic, a
         ) / domain.cylinder_radius**3
 
         hcons = System(sqr_gamma, trial='h').solve_constraints(
-            droptol=1e-9, constrain={'h': dm_outer_cons.copy()}, arguments=args)
+            droptol=1e-9, constrain={'h': dm_outer_cons.copy()}, arguments=state_args)
 
         res_h = Pressure('1Pa') * new_topo['fluid'].integral(
             '∇ref_j(htest_i) Ph_ij dVref' @ ns_h, degree=4)
@@ -1159,6 +1160,9 @@ def remesh_fluid(current_t_s, xb_current_m, domain, ns, solid, fluid, dynamic, a
         # Ingredients for the per-timestep interface update
         dm_zipped_interface = zipped_traction,
         d_s_remesh_const_m  = d_s_remesh_const_m,
+
+        extend_mesh_state         = _extend_mesh_state,
+        dm_interface_target_expr  = dm_interface_target_expr,
 
         # Fixed outer-boundary constraint and interface data
         dm_outer_cons       = dm_outer_cons,
@@ -1812,6 +1816,26 @@ def main(domain: Domain = Domain(), solid: Optional[Solid] = Solid(), fluid: Opt
                 f'J fluid min/max: {Jf_pred.min():.6e}, {Jf_pred.max():.6e} | '
                 f'J solid min/max: {Js_pred.min():.6e}, {Js_pred.max():.6e}')
 
+            if has_remeshed and istep - fluid_state['remesh_istep'] == 1:
+
+                    dm_pred = args['dm'].copy()
+        
+                    dm_eq = fluid_state['extend_mesh_state'](
+                        fluid_state['dm_interface_target_expr'],
+                        args)
+        
+                    ddm_eq_g = function.eval(
+                        fluid_state['transfer_sample'].bind(fluid_state['d_field']),
+                        arguments=dict(args, dm=dm_pred - dm_eq))
+        
+                    ddm_eq = numpy.linalg.norm(
+                        numpy.asarray(ddm_eq_g / 'm'), axis=-1)
+        
+                    log.info(
+                        f'[FRESH MESH PREDICTOR] '
+                        f'max|dm_pred-dm_eq|={ddm_eq.max():.6e} m')
+            
+
         # ------------------------------------------------------------
         # Solve nonlinear system
         # ------------------------------------------------------------
@@ -1960,27 +1984,13 @@ def main(domain: Domain = Domain(), solid: Optional[Solid] = Solid(), fluid: Opt
                 zipped.bind(ns.am), zipped.bind(ns.a)],
                 arguments=args)
 
-            dd = numpy.linalg.norm(
-                numpy.asarray(dm_g / 'm')
-                - (numpy.asarray(ds_g / 'm') - fluid_state['d_s_remesh_const_m']),
-                axis=-1)
-
-            dv = numpy.linalg.norm(
-                numpy.asarray((vm_g - vs_g) / 'm/s'),
-                axis=-1)
-
-            da = numpy.linalg.norm(
-                numpy.asarray((am_g - as_g) / 'm/s2'),
-                axis=-1)
+            dd = numpy.linalg.norm(numpy.asarray(dm_g / 'm') - (numpy.asarray(ds_g / 'm') - fluid_state['d_s_remesh_const_m']), axis=-1)
+            dv = numpy.linalg.norm(numpy.asarray((vm_g - vs_g) / 'm/s'), axis=-1)
+            da = numpy.linalg.norm(numpy.asarray((am_g - as_g) / 'm/s2'), axis=-1)
 
             R_m = float(domain.cylinder_radius / 'm')
-            vs_ref = max(
-                numpy.linalg.norm(numpy.asarray(vs_g / 'm/s'), axis=-1).max(),
-                1e-30)
-
-            as_ref = max(
-                numpy.linalg.norm(numpy.asarray(as_g / 'm/s2'), axis=-1).max(),
-                1e-30)
+            vs_ref = max(numpy.linalg.norm(numpy.asarray(vs_g / 'm/s'), axis=-1).max(), 1e-30)
+            as_ref = max(numpy.linalg.norm(numpy.asarray(as_g / 'm/s2'), axis=-1).max(), 1e-30)
 
             log.info(f'[INTERFACE STEP] ||dm-(ds-ds_r)|| max={dd.max():.6e} m, /R={dd.max()/R_m:.6e}')
             log.info(f'[INTERFACE STEP] ||vm-vs|| max={dv.max():.6e} m/s, rel={dv.max()/vs_ref:.6e}')
@@ -1996,14 +2006,7 @@ def main(domain: Domain = Domain(), solid: Optional[Solid] = Solid(), fluid: Opt
 
                 sample = fluid_state['transfer_sample']
 
-                am_now = numpy.asarray(
-                    function.eval(
-                        sample.bind(fluid_state['a_field']),
-                        arguments=args
-                    ) / 'm/s2',
-                    dtype=float,
-                )
-
+                am_now = numpy.asarray(function.eval(sample.bind(fluid_state['a_field']), arguments=args) / 'm/s2', dtype=float)
                 am0  = fluid_state['am_restart_ms2']
                 seed = fluid_state['am_transfer_error_ms2']
 
@@ -2025,9 +2028,7 @@ def main(domain: Domain = Domain(), solid: Optional[Solid] = Solid(), fluid: Opt
 
                 x0 = fluid_state['transfer_x0_m']
 
-                dx_peak = numpy.linalg.norm(
-                    x0[i_seed] - x0[i_dam])
-
+                dx_peak = numpy.linalg.norm(x0[i_seed] - x0[i_dam])
                 dam_prev = fluid_state['dam_previous']
 
                 if dam_prev is None:
