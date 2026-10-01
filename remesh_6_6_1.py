@@ -1877,6 +1877,21 @@ def main(domain: Domain = Domain(), solid: Optional[Solid] = Solid(), fluid: Opt
 
         try:
             args = system.solve(constrain=cons, arguments=args, tol=1e-9)
+            if has_remeshed and istep - fluid_state['remesh_istep'] == 1:
+                ddm_newton = args['dm'] - dm_pred
+                ddm_eq_coeff = dm_eq - dm_pred
+
+                R_m = float(domain.cylinder_radius / 'm')
+
+                diff = numpy.linalg.norm(
+                    ddm_newton - ddm_eq_coeff, axis=1
+                ) * R_m
+
+                log.info(
+                    f'[MESH EQ vs NEWTON] '
+                    f'max difference={diff.max():.6e} m, '
+                    f'RMS={numpy.sqrt(numpy.mean(diff**2)):.6e} m'
+                )
 
         except Exception:
             log.info('Newton failed. Mesh quality of current prediction / last available state:')
