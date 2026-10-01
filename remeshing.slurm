@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=remesh2
+#SBATCH --job-name=cross_remesh
 #SBATCH --output=output_%j.txt
 #SBATCH --error=error_%j.txt
 #SBATCH --nodes=1
@@ -18,7 +18,7 @@ module load imkl/2025.1.0
 module load libGLU/9.0.2-GCCcore-11.3.0
 source ~/myenv/bin/activate
 
-cd /scratch-shared/20236379/cross-slot
+cd /scratch-shared/20236379/Remeshing
 
 python -c "import nutils; print(nutils.__version__)"
 
