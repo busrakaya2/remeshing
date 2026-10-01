@@ -1816,7 +1816,11 @@ def main(domain: Domain = Domain(), solid: Optional[Solid] = Solid(), fluid: Opt
                 f'J fluid min/max: {Jf_pred.min():.6e}, {Jf_pred.max():.6e} | '
                 f'J solid min/max: {Js_pred.min():.6e}, {Js_pred.max():.6e}')
 
-            if has_remeshed and istep - fluid_state['remesh_istep'] == 1:
+            #if has_remeshed and istep - fluid_state['remesh_istep'] == 1:
+            if has_remeshed:
+                age = istep - fluid_state['remesh_istep']
+                log.info(f'[PREDICTOR AGE] istep={istep}, remesh_istep={fluid_state["remesh_istep"]}, age={age}')
+                if age == 1:
 
                     dm_pred = args['dm'].copy()
         
