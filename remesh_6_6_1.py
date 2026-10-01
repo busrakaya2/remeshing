@@ -1769,6 +1769,9 @@ def main(domain: Domain = Domain(), solid: Optional[Solid] = Solid(), fluid: Opt
                 args = dynamic.newmark_defo_args_named(
                     args, name='dm', d0_name='dm0',
                     u0dt_name='vm0δt', a0dt2_name='am0δt2')
+                dm_pred_expected = dm_n + Vn + 0.5*An
+                err = numpy.linalg.norm(args['dm'] - dm_pred_expected, axis=1).max()
+                log.info(f'[PREDICTOR FORMULA CHECK] max coeff error={err:.6e}')
                 
             if has_remeshed and istep % 20 == 0:
 
