@@ -1880,6 +1880,28 @@ def main(domain: Domain = Domain(), solid: Optional[Solid] = Solid(), fluid: Opt
 
         try:
             args = system.solve(constrain=cons, arguments=args, tol=1e-9)
+                        # Newton correction: solid vs mesh at the interface
+            if has_remeshed and istep <= fluid_state['remesh_istep'] + 10:
+
+                dm_sol_g, ds_sol_g = function.eval([zipped.bind(ns.dm), zipped.bind(ns.d)], arguments=args)
+
+                δdm_g = (numpy.asarray(dm_sol_g / 'm') - numpy.asarray(dm_pred_g / 'm'))
+
+                δds_g = (numpy.asarray(ds_sol_g / 'm') - numpy.asarray(ds_pred_g / 'm'))
+
+                mag_dm = numpy.linalg.norm(δdm_g, axis=-1)
+                mag_ds = numpy.linalg.norm(δds_g, axis=-1)
+                err    = numpy.linalg.norm(δdm_g - δds_g, axis=-1)
+
+                rel_err = err.max() / max(mag_ds.max(), 1e-30)
+
+                log.info(
+                    f'[INTERFACE NEWTON CORRECTION] '
+                    f'max|δdm|={mag_dm.max():.6e} m | '
+                    f'max|δds|={mag_ds.max():.6e} m | '
+                    f'max|δdm-δds|={err.max():.6e} m | '
+                    f'rel={rel_err:.6e}')
+            
             if has_remeshed and istep - fluid_state['remesh_istep'] == 1:
                 ddm_newton = args['dm'] - dm_pred
                 ddm_eq_coeff = dm_eq - dm_pred
@@ -1895,6 +1917,7 @@ def main(domain: Domain = Domain(), solid: Optional[Solid] = Solid(), fluid: Opt
                     f'max difference={diff.max():.6e} m, '
                     f'RMS={numpy.sqrt(numpy.mean(diff**2)):.6e} m'
                 )
+            
 
         except Exception:
             log.info('Newton failed. Mesh quality of current prediction / last available state:')
