@@ -422,7 +422,12 @@ def remesh_fluid(current_t_s, xb_current_m, domain, ns, solid, fluid, dynamic, a
     new_res += res_mesh_bulk
 
     # Fluid momentum and incompressibility, gradients w.r.t. moving x_m
-    new_res += new_topo['fluid'].integral('(utest_i ρf DuDt_i + ∇_j(utest_i) σ_ij) dV' @ ns_f, degree=4)
+    res_fluid_acc  = new_topo['fluid'].integral('utest_i ρf (am_i + arel_i) dV' @ ns_f, degree=4)
+    res_fluid_conv = new_topo['fluid'].integral('utest_i ρf ∇_j(u_i) urel_j dV' @ ns_f, degree=4)
+    res_fluid_visc = new_topo['fluid'].integral('∇_j(utest_i) μf (∇_j(u_i) + ∇_i(u_j)) dV' @ ns_f, degree=4)
+    res_fluid_pres = new_topo['fluid'].integral('-∇_j(utest_i) p δ_ij dV' @ ns_f, degree=4)
+
+    new_res += res_fluid_acc + res_fluid_conv + res_fluid_visc + res_fluid_pres
     new_res += new_topo['fluid'].integral('ptest ∇_k(u_k) dV' @ ns_f, degree=4)
 
     # ------------------------------------------------------------------
@@ -521,6 +526,12 @@ def remesh_fluid(current_t_s, xb_current_m, domain, ns, solid, fluid, dynamic, a
     rmesh_bulk_expr       = res_mesh_bulk.derivative('dmtest')
     rmesh_lam_expr        = res_mesh_lam.derivative('dmtest')
     rmesh_constraint_expr = res_mesh_constraint.derivative('lamtest')
+
+    rfluid_acc_expr  = res_fluid_acc.derivative('utest')
+    rfluid_conv_expr = res_fluid_conv.derivative('utest')
+    rfluid_visc_expr = res_fluid_visc.derivative('utest')
+    rfluid_pres_expr = res_fluid_pres.derivative('utest')
+    
     
 
     # ------------------------------------------------------------------
@@ -1180,6 +1191,11 @@ def remesh_fluid(current_t_s, xb_current_m, domain, ns, solid, fluid, dynamic, a
         mesh_bulk_residual       = rmesh_bulk_expr,
         mesh_lam_residual        = rmesh_lam_expr,
         mesh_constraint_residual = rmesh_constraint_expr,
+
+        fluid_acc_residual  = rfluid_acc_expr,
+        fluid_conv_residual = rfluid_conv_expr,
+        fluid_visc_residual = rfluid_visc_expr,
+        fluid_pres_residual = rfluid_pres_expr,
     )
 
     return (
@@ -1877,6 +1893,38 @@ def main(domain: Domain = Domain(), solid: Optional[Solid] = Solid(), fluid: Opt
                 f'lambda={numpy.abs(rl).max():.6e} | '
                 f'constraint={numpy.abs(rc).max():.6e}'
             )
+        if has_remeshed and istep <= fluid_state['remesh_istep'] + 10:
+
+            ra, rc, rv, rp = function.eval([
+                fluid_state['fluid_acc_residual'],
+                fluid_state['fluid_conv_residual'],
+                fluid_state['fluid_visc_residual'],
+                fluid_state['fluid_pres_residual']], arguments=args)
+        
+            ra, rc, rv, rp = [numpy.asarray(x).reshape(-1) for x in (ra, rc, rv, rp)]
+        
+            free_u = ~numpy.isfinite(cons['u']).reshape(-1)
+            ra, rc, rv, rp = [x[free_u] for x in (ra, rc, rv, rp)]
+        
+            for name, r in (
+                ('acc',  ra),
+                ('conv', rc),
+                ('visc', rv),
+                ('pres', rp),
+            ):
+                log.info(
+                    f'[FLUID RESIDUAL SPLIT] {name}: '
+                    f'L2={numpy.linalg.norm(r):.6e}, '
+                    f'RMS={numpy.sqrt(numpy.mean(r**2)):.6e}, '
+                    f'max={numpy.abs(r).max():.6e}')
+        
+            rsum = ra + rc + rv + rp
+            
+            log.info(
+                f'[FLUID RESIDUAL SPLIT] total: '
+                f'L2={numpy.linalg.norm(rsum):.6e}, '
+                f'max={numpy.abs(rsum).max():.6e}')  
+            
         if has_remeshed and istep <= fluid_state['remesh_istep'] + 10:
 
             for trial_name, test_name in (
