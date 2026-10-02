@@ -1877,6 +1877,28 @@ def main(domain: Domain = Domain(), solid: Optional[Solid] = Solid(), fluid: Opt
                 f'lambda={numpy.abs(rl).max():.6e} | '
                 f'constraint={numpy.abs(rc).max():.6e}'
             )
+        if has_remeshed and istep <= fluid_state['remesh_istep'] + 10:
+
+            for trial_name, test_name in (
+                ('d',   'dtest'),      # solid momentum
+                ('dm',  'dmtest'),     # mesh equilibrium
+                ('u',   'utest'),      # fluid momentum
+                ('p',   'ptest'),      # fluid incompressibility
+                ('lam', 'lamtest'),    # interface constraint
+            ):
+
+                values = numpy.asarray(function.eval(res.derivative(test_name), arguments=args), dtype=float).reshape(-1)
+
+                if trial_name in cons:
+                    free = ~numpy.isfinite(cons[trial_name]).reshape(-1)
+                    values = values[free]
+
+                log.info(
+                    f'[PRE-NEWTON RESIDUAL] {trial_name}: '
+                    f'L2={numpy.linalg.norm(values):.6e}, '
+                    f'RMS={numpy.sqrt(numpy.mean(values**2)):.6e}, '
+                    f'max={numpy.abs(values).max():.6e}'
+                )
 
         try:
             args = system.solve(constrain=cons, arguments=args, tol=1e-9)
