@@ -422,7 +422,9 @@ def remesh_fluid(current_t_s, xb_current_m, domain, ns, solid, fluid, dynamic, a
     new_res += res_mesh_bulk
 
     # Fluid momentum and incompressibility, gradients w.r.t. moving x_m
-    res_fluid_acc  = new_topo['fluid'].integral('utest_i ρf (am_i + arel_i) dV' @ ns_f, degree=4)
+    res_fluid_am   = new_topo['fluid'].integral('utest_i ρf am_i dV' @ ns_f, degree=4)
+    res_fluid_arel = new_topo['fluid'].integral('utest_i ρf arel_i dV' @ ns_f, degree=4)
+    res_fluid_acc  = res_fluid_am + res_fluid_arel
     res_fluid_conv = new_topo['fluid'].integral('utest_i ρf ∇_j(u_i) urel_j dV' @ ns_f, degree=4)
     res_fluid_visc = new_topo['fluid'].integral('∇_j(utest_i) μf (∇_j(u_i) + ∇_i(u_j)) dV' @ ns_f, degree=4)
     res_fluid_pres = new_topo['fluid'].integral('-∇_j(utest_i) p δ_ij dV' @ ns_f, degree=4)
@@ -528,6 +530,8 @@ def remesh_fluid(current_t_s, xb_current_m, domain, ns, solid, fluid, dynamic, a
     rmesh_constraint_expr = res_mesh_constraint.derivative('lamtest')
 
     rfluid_acc_expr  = res_fluid_acc.derivative('utest')
+    rfluid_am_expr   = res_fluid_am.derivative('utest')
+    rfluid_arel_expr = res_fluid_arel.derivative('utest')
     rfluid_conv_expr = res_fluid_conv.derivative('utest')
     rfluid_visc_expr = res_fluid_visc.derivative('utest')
     rfluid_pres_expr = res_fluid_pres.derivative('utest')
@@ -1196,6 +1200,10 @@ def remesh_fluid(current_t_s, xb_current_m, domain, ns, solid, fluid, dynamic, a
         fluid_conv_residual = rfluid_conv_expr,
         fluid_visc_residual = rfluid_visc_expr,
         fluid_pres_residual = rfluid_pres_expr,
+
+        fluid_am_residual   = rfluid_am_expr,
+        fluid_arel_residual = rfluid_arel_expr,
+        
     )
 
     return (
@@ -1895,16 +1903,34 @@ def main(domain: Domain = Domain(), solid: Optional[Solid] = Solid(), fluid: Opt
             )
         if has_remeshed and istep <= fluid_state['remesh_istep'] + 10:
 
-            ra, rc, rv, rp = function.eval([
+            ra, ram, rarel, rc, rv, rp = function.eval([
                 fluid_state['fluid_acc_residual'],
+                fluid_state['fluid_am_residual'],
+                fluid_state['fluid_arel_residual'],
                 fluid_state['fluid_conv_residual'],
                 fluid_state['fluid_visc_residual'],
-                fluid_state['fluid_pres_residual']], arguments=args)
+                fluid_state['fluid_pres_residual'],
+            ], arguments=args)
         
-            ra, rc, rv, rp = [numpy.asarray(x).reshape(-1) for x in (ra, rc, rv, rp)]
-        
+            ra, ram, rarel, rc, rv, rp = [numpy.asarray(x).reshape(-1) for x in (ra, ram, rarel, rc, rv, rp)]
+
             free_u = ~numpy.isfinite(cons['u']).reshape(-1)
-            ra, rc, rv, rp = [x[free_u] for x in (ra, rc, rv, rp)]
+            ra, ram, rarel, rc, rv, rp = [x[free_u] for x in (ra, ram, rarel, rc, rv, rp)]
+        
+            cos_ap = numpy.dot(ra, rp) / max(numpy.linalg.norm(ra) * numpy.linalg.norm(rp), 1e-30)
+
+            log.info(
+                f'[FLUID ACC-PRES BALANCE] '
+                f'cos(acc,pres)={cos_ap:.6e}, '
+                f'||acc+pres||={numpy.linalg.norm(ra+rp):.6e}'
+            )
+
+            log.info(
+                f'[FLUID ACC SPLIT] '
+                f'||am||={numpy.linalg.norm(ram):.6e}, '
+                f'||arel||={numpy.linalg.norm(rarel):.6e}, '
+                f'||am+arel||={numpy.linalg.norm(ram+rarel):.6e}'
+            )
         
             for name, r in (
                 ('acc',  ra),
